@@ -1,130 +1,217 @@
-#include <windows.h>
-#include <iostream>
+ï»¿#include <windows.h>
+#include <shellapi.h>   // æ‰˜ç›˜å›¾æ ‡æ‰€éœ€
+#include <string>
 
-// ÉùÃ÷ UnblockInput º¯Êı
+// å‡½æ•°å£°æ˜
 void UnblockInput();
+LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
+LRESULT CALLBACK KeyboardProc(int nCode, WPARAM wParam, LPARAM lParam);
+LRESULT CALLBACK MouseProc(int nCode, WPARAM wParam, LPARAM lParam);
 
-HHOOK keyboardHook = NULL;
-HHOOK mouseHook = NULL;
-bool isBlocked = false;
-HANDLE exitEvent = NULL; // ÓÃÓÚÍ¨ÖªÍË³öµÄÊÂ¼ş
+// å…¨å±€å˜é‡
+HHOOK keyboardHook = NULL; // é”®ç›˜é’©å­å¥æŸ„
+HHOOK mouseHook = NULL;    // é¼ æ ‡é’©å­å¥æŸ„
+bool isBlocked = false;    // è¾“å…¥å±è”½çŠ¶æ€
+HWND g_hwnd = NULL;        // ä¸»çª—å£å¥æŸ„ï¼Œä¾›å…¶ä»–å‡½æ•°ä½¿ç”¨
+NOTIFYICONDATA nid = {};   // æ‰˜ç›˜å›¾æ ‡æ•°æ®
 
-// ¼üÅÌ¹³×Ó¹ı³Ì
+// è§£é™¤è¾“å…¥å±è”½
+void UnblockInput() {
+    if (isBlocked) {
+        isBlocked = false;
+        std::wstring newText = L"Input Unblocked! (Ctrl+Alt+B to toggle)";
+        SetWindowText(g_hwnd, newText.c_str());
+        InvalidateRect(g_hwnd, NULL, TRUE); // å¼ºåˆ¶é‡ç»˜çª—å£
+    }
+}
+
+// å±è”½è¾“å…¥
+void BlockInput() {
+    if (!isBlocked) {
+        isBlocked = true;
+        std::wstring newText = L"Input Blocked! (Ctrl+Alt+B to toggle)";
+        SetWindowText(g_hwnd, newText.c_str());
+        InvalidateRect(g_hwnd, NULL, TRUE);
+    }
+}
+
+// åˆ‡æ¢å±è”½çŠ¶æ€
+void ToggleBlockInput() {
+    if (isBlocked)
+        UnblockInput();
+    else
+        BlockInput();
+}
+
+// æ·»åŠ æ‰˜ç›˜å›¾æ ‡
+void AddTrayIcon(HWND hwnd) {
+    nid.cbSize = sizeof(NOTIFYICONDATA);
+    nid.hWnd = hwnd;
+    nid.uID = 1;
+    nid.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
+    nid.uCallbackMessage = WM_USER + 1;           // è‡ªå®šä¹‰æ‰˜ç›˜æ¶ˆæ¯
+    nid.hIcon = LoadIcon(NULL, IDI_APPLICATION); // ä½¿ç”¨é»˜è®¤åº”ç”¨ç¨‹åºå›¾æ ‡
+    wcscpy_s(nid.szTip, L"Input Blocker");
+    Shell_NotifyIcon(NIM_ADD, &nid);
+}
+
+// ç§»é™¤æ‰˜ç›˜å›¾æ ‡
+void RemoveTrayIcon() {
+    Shell_NotifyIcon(NIM_DELETE, &nid);
+}
+
+// é”®ç›˜é’©å­è¿‡ç¨‹ï¼ˆä½çº§é’©å­ï¼‰
 LRESULT CALLBACK KeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
     if (nCode >= 0) {
         KBDLLHOOKSTRUCT* p = (KBDLLHOOKSTRUCT*)lParam;
 
-        // ¼ì²éÊÇ·ñÊÇ½â³ıÆÁ±ÎµÄ¿ì½İ¼ü (Ctrl + Alt + Q)
-        if (p->vkCode == 'Q' && GetAsyncKeyState(VK_CONTROL) & 0x8000 && GetAsyncKeyState(VK_MENU) & 0x8000) {
+        // æ£€æµ‹ Ctrl+Alt+Qï¼ˆå¼ºåˆ¶è§£é™¤å±è”½ï¼‰
+        if (p->vkCode == 'Q' && (GetAsyncKeyState(VK_CONTROL) & 0x8000) && (GetAsyncKeyState(VK_MENU) & 0x8000)) {
             if (wParam == WM_KEYDOWN) {
                 UnblockInput();
-                return 1; // ×èÖ¹¸Ã¼üµÄÄ¬ÈÏ´¦Àí
+                return 1; // é˜»æ­¢è¯¥é”®ç»§ç»­ä¼ é€’
             }
         }
 
+        // æ£€æµ‹ Ctrl+Alt+Bï¼ˆåˆ‡æ¢å±è”½çŠ¶æ€ï¼‰
+        if (p->vkCode == 'B' && (GetAsyncKeyState(VK_CONTROL) & 0x8000) && (GetAsyncKeyState(VK_MENU) & 0x8000)) {
+            if (wParam == WM_KEYDOWN) {
+                ToggleBlockInput();
+                return 1; // é˜»æ­¢è¯¥é”®ç»§ç»­ä¼ é€’
+            }
+        }
+
+        // å¦‚æœå½“å‰å¤„äºå±è”½çŠ¶æ€ï¼Œåˆ™é˜»æ­¢ç»å¤§å¤šæ•°æŒ‰é”®ï¼Œä»…å…è®¸ä¿®é¥°é”®é€šè¿‡
         if (isBlocked) {
-            // ÔÊĞíĞŞÊÎ¼üÍ¨¹ı
             if (p->vkCode == VK_CONTROL || p->vkCode == VK_LCONTROL || p->vkCode == VK_RCONTROL ||
                 p->vkCode == VK_MENU || p->vkCode == VK_LMENU || p->vkCode == VK_RMENU ||
                 p->vkCode == VK_SHIFT || p->vkCode == VK_LSHIFT || p->vkCode == VK_RSHIFT) {
                 return CallNextHookEx(keyboardHook, nCode, wParam, lParam);
             }
             else {
-                return 1; // ×èÖ¹ÆäËûËùÓĞ°´¼ü
+                return 1; // å±è”½å…¶ä»–æ‰€æœ‰æŒ‰é”®
             }
         }
     }
     return CallNextHookEx(keyboardHook, nCode, wParam, lParam);
 }
 
-// Êó±ê¹³×Ó¹ı³Ì
+// é¼ æ ‡é’©å­è¿‡ç¨‹ï¼ˆä½çº§é’©å­ï¼‰
 LRESULT CALLBACK MouseProc(int nCode, WPARAM wParam, LPARAM lParam) {
     if (isBlocked && nCode >= 0) {
-        return 1; // Èç¹û´¦ÓÚÆÁ±Î×´Ì¬£¬×èÖ¹ËùÓĞÊó±êÊäÈë
+        return 1; // å±è”½æ‰€æœ‰é¼ æ ‡è¾“å…¥
     }
     return CallNextHookEx(mouseHook, nCode, wParam, lParam);
 }
 
-void UnblockInput() {
-    if (isBlocked) {
-        isBlocked = false;
-        std::cout << "ÊäÈëÒÑ½â³ıÆÁ±Î£¡" << std::endl;
-        SetEvent(exitEvent); // ÉèÖÃÊÂ¼ş£¬Í¨ÖªÖ÷Ïß³ÌÍË³ö
-    }
-}
+// ç¨‹åºå…¥å£ç‚¹
+int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
+    const wchar_t CLASS_NAME[] = L"FloatingWindowClass";
 
-void BlockInputWithHook() {
-    if (!isBlocked) {
-        isBlocked = true;
-        std::cout << "¼üÅÌºÍÊó±êÊäÈëÒÑÆÁ±Î£¡" << std::endl;
-        std::cout << "°´ Ctrl + Alt + Q ½â³ıÆÁ±Î¡£" << std::endl;
-    }
-}
+    // æ³¨å†Œçª—å£ç±»
+    WNDCLASS wc = {};
+    wc.lpfnWndProc = WndProc;
+    wc.hInstance = hInstance;
+    wc.lpszClassName = CLASS_NAME;
+    // ä¸è®¾ç½®èƒŒæ™¯åˆ·ï¼Œå› ä¸ºæˆ‘ä»¬è‡ªå·±ç»˜åˆ¶
+    RegisterClass(&wc);
 
-int main() {
-    // ´´½¨ÍË³öÊÂ¼ş
-    exitEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
-    if (!exitEvent) {
-        std::cerr << "ÎŞ·¨´´½¨ÍË³öÊÂ¼ş£¡" << std::endl;
-        return 1;
-    }
+    // åˆ›å»ºæ‚¬æµ®çª—å£ï¼ˆç½®é¡¶ã€åˆ†å±‚ã€ä¸æ˜¾ç¤ºåœ¨ä»»åŠ¡æ ï¼‰
+    HWND hwnd = CreateWindowEx(
+        WS_EX_TOPMOST | WS_EX_LAYERED | WS_EX_TOOLWINDOW,
+        CLASS_NAME,
+        L"Press Ctrl+Alt+B to toggle input block",
+        WS_POPUP,
+        10, 10, 400, 50,            // å®½åº¦åŠ å¤§ï¼Œç¡®ä¿çŠ¶æ€æ–‡æœ¬èƒ½å®Œæ•´æ˜¾ç¤º
+        NULL, NULL, hInstance, NULL
+    );
 
-    // °²×°¼üÅÌºÍÊó±ê¹³×Ó
+    if (hwnd == NULL) return 1;
+
+    g_hwnd = hwnd; // ä¿å­˜å…¨å±€çª—å£å¥æŸ„
+
+    // è®¾ç½®çª—å£æ•´ä½“é€æ˜åº¦ï¼ˆ200 = åŠé€æ˜ï¼‰ï¼Œä¸ä½¿ç”¨é¢œè‰²é”®
+    SetLayeredWindowAttributes(hwnd, 0, 200, LWA_ALPHA);
+
+    ShowWindow(hwnd, SW_SHOW);
+
+    // å®‰è£…ä½çº§é’©å­
     keyboardHook = SetWindowsHookEx(WH_KEYBOARD_LL, KeyboardProc, GetModuleHandle(NULL), 0);
     mouseHook = SetWindowsHookEx(WH_MOUSE_LL, MouseProc, GetModuleHandle(NULL), 0);
-
     if (!keyboardHook || !mouseHook) {
-        std::cerr << "ÎŞ·¨°²×°¹³×Ó£¡" << std::endl;
-        CloseHandle(exitEvent);
+        MessageBox(hwnd, L"Hook installation failed", L"Error", MB_OK | MB_ICONERROR);
         return 1;
     }
 
-    // ¿ªÊ¼ÆÁ±ÎÊäÈë
-    BlockInputWithHook();
+    // æ·»åŠ æ‰˜ç›˜å›¾æ ‡
+    AddTrayIcon(hwnd);
 
-    // Ê¹ÓÃ MsgWaitForMultipleObjects µÄÏûÏ¢Ñ­»·
+    // ä¸»æ¶ˆæ¯å¾ªç¯
     MSG msg;
-    while (true) {
-        DWORD result = MsgWaitForMultipleObjects(
-            1,                  // µÈ´ıµÄ¶ÔÏóÊıÁ¿
-            &exitEvent,        // µÈ´ıµÄÊÂ¼ş
-            FALSE,             // ²»ĞèÒªËùÓĞ¶ÔÏó¶¼´¥·¢
-            INFINITE,          // ÎŞÏŞµÈ´ı
-            QS_ALLINPUT        // µÈ´ıËùÓĞÀàĞÍµÄÊäÈëÏûÏ¢
-        );
-
-        if (result == WAIT_OBJECT_0) {
-            // ÍË³öÊÂ¼ş±»´¥·¢£¬ÍË³öÑ­»·
-            break;
-        }
-        else if (result == WAIT_OBJECT_0 + 1) {
-            // ÓĞÏûÏ¢µ½´ï£¬´¦ÀíËùÓĞÏûÏ¢
-            while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
-                TranslateMessage(&msg);
-                DispatchMessage(&msg);
-            }
-        }
-        else {
-            // ´íÎó·¢Éú£¬ÍË³öÑ­»·
-            std::cerr << "ÏûÏ¢Ñ­»·³ö´í£¡" << std::endl;
-            break;
-        }
+    while (GetMessage(&msg, NULL, 0, 0)) {
+        TranslateMessage(&msg);
+        DispatchMessage(&msg);
     }
 
-    // Ğ¶ÔØ¹³×Ó
+    // æ¸…ç†èµ„æº
     if (keyboardHook) UnhookWindowsHookEx(keyboardHook);
-    if (mouseHook) UnhookWindowsHookEx(mouseHook);
+    if (mouseHook)    UnhookWindowsHookEx(mouseHook);
+    RemoveTrayIcon();
 
-    // ¹Ø±ÕÍË³öÊÂ¼ş
-    if (exitEvent) CloseHandle(exitEvent);
+    return 0;
+}
 
-    std::cout << "³ÌĞò½áÊø¡£" << std::endl;
+// çª—å£è¿‡ç¨‹
+LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    switch (msg) {
+    case WM_PAINT: {
+        PAINTSTRUCT ps;
+        HDC hdc = BeginPaint(hwnd, &ps);
 
-    // Ìí¼Ó¹Ø±Õ´°¿ÚµÄ´úÂë
-    HWND hwnd = GetConsoleWindow();
-    if (hwnd != NULL) {
-        PostMessage(hwnd, WM_CLOSE, 0, 0);
+        // ç”¨é»‘è‰²å¡«å……æ•´ä¸ªå®¢æˆ·åŒºï¼ˆç”±äºè®¾ç½®äº† LWA_ALPHAï¼Œä¼šå‘ˆç°åŠé€æ˜æ•ˆæœï¼‰
+        // å¡«å……èƒŒæ™¯å¯ä»¥é¿å…æ–‡å­—æ®‹ç•™
+        FillRect(hdc, &ps.rcPaint, (HBRUSH)GetStockObject(BLACK_BRUSH));
+
+        // ç»˜åˆ¶çª—å£æ ‡é¢˜æ–‡æœ¬ï¼ˆå±…ä¸­ã€ç™½è‰²ã€é€æ˜èƒŒæ™¯ï¼‰
+        RECT rect;
+        GetClientRect(hwnd, &rect);
+        SetBkMode(hdc, TRANSPARENT);
+        SetTextColor(hdc, RGB(255, 255, 255));
+
+        wchar_t buffer[256];
+        GetWindowText(hwnd, buffer, 256);
+        DrawText(hdc, buffer, -1, &rect, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+
+        EndPaint(hwnd, &ps);
+        break;
     }
 
+    case WM_USER + 1: // æ‰˜ç›˜å›¾æ ‡æ¶ˆæ¯
+        if (lParam == WM_RBUTTONUP) {
+            // å¼¹å‡ºå³é”®èœå•ï¼ˆä»…åŒ…å«â€œé€€å‡ºâ€é€‰é¡¹ï¼‰
+            HMENU hMenu = CreatePopupMenu();
+            AppendMenu(hMenu, MF_STRING, 1001, L"Exit");
+
+            POINT pt;
+            GetCursorPos(&pt);
+
+            SetForegroundWindow(hwnd);
+            TrackPopupMenu(hMenu, TPM_RIGHTBUTTON, pt.x, pt.y, 0, hwnd, NULL);
+            DestroyMenu(hMenu);
+        }
+        break;
+
+    case WM_COMMAND:
+        if (LOWORD(wParam) == 1001) // ç‚¹å‡»äº†â€œé€€å‡ºâ€
+            PostQuitMessage(0);
+        break;
+
+    case WM_DESTROY:
+        PostQuitMessage(0);
+        break;
+
+    default:
+        return DefWindowProc(hwnd, msg, wParam, lParam);
+    }
     return 0;
 }
